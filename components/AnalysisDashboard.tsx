@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import Papa from 'papaparse';
 import { 
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, Label 
 } from 'recharts';
-import { Brain, AlertTriangle, RefreshCw, BarChart2, Info, ArrowRight, Table } from 'lucide-react';
+import { Brain, AlertTriangle, RefreshCw, BarChart2, Info, ArrowRight, Table, Download } from 'lucide-react';
 import { Dataset, OutlierDataPoint, DataRow } from '../types';
 import { detectOutliers } from '../utils/stats';
 import { analyzeOutliersWithGemini } from '../services/geminiService';
@@ -81,25 +82,96 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ dataset, onReset,
       });
   };
 
+  const handleExportCsv = () => {
+    if (!dataset.data || dataset.data.length === 0) return;
+
+    // Unparse the data to CSV format
+    const csv = Papa.unparse(dataset.data);
+    
+    // Create a blob and trigger download
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    // Generate filename based on original name or timestamp
+    const safeName = dataset.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const fileName = `${safeName}_edited.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
-      const data = payload[0].payload;
+      const data = payload[0].payload as OutlierDataPoint;
+      
+      // Find a label column (heuristic: first string column that isn't the ID)
+      const labelColumn = dataset.columns.find(col => 
+        typeof data[col] === 'string' && col !== 'id' && col !== xKey && col !== yKey
+      ) || dataset.columns.find(col => typeof data[col] === 'string');
+
       return (
-        <div className="bg-slate-800 border border-slate-700 p-3 rounded shadow-xl text-xs z-50">
-          <p className="font-semibold text-slate-200 mb-1">
-            {xKey}: {data[xKey]}
-          </p>
-          <p className="font-semibold text-slate-200 mb-2">
-            {yKey}: {data[yKey]}
-          </p>
+        <div className={`
+          bg-slate-900/95 backdrop-blur-sm border rounded-lg shadow-2xl text-sm z-50 min-w-[240px] transition-all duration-200 overflow-hidden
+          ${data.isOutlier ? 'border-red-500/50 shadow-red-900/20' : 'border-slate-700/80 shadow-slate-900/50'}
+        `}>
+          {/* Header */}
+          <div className={`px-4 py-3 border-b ${data.isOutlier ? 'bg-red-500/10 border-red-500/20' : 'bg-slate-800/50 border-slate-700/50'}`}>
+            {labelColumn ? (
+              <div className="font-bold text-slate-100 truncate">
+                {String(data[labelColumn])}
+              </div>
+            ) : (
+               <div className="font-bold text-slate-100">Data Point</div>
+            )}
+            {data.id && labelColumn !== 'id' && (
+               <div className="text-xs text-slate-500 font-mono mt-0.5">ID: {data.id}</div>
+            )}
+          </div>
+          
+          {/* Body */}
+          <div className="p-4 space-y-3">
+            <div className="flex justify-between items-center gap-4">
+              <span className="text-slate-400 font-medium text-xs uppercase tracking-wider">{xKey}</span>
+              <span className="font-mono text-blue-300 font-semibold text-base">
+                {typeof data[xKey] === 'number' ? Number(data[xKey]).toLocaleString(undefined, { maximumFractionDigits: 2 }) : data[xKey]}
+              </span>
+            </div>
+            <div className="flex justify-between items-center gap-4">
+              <span className="text-slate-400 font-medium text-xs uppercase tracking-wider">{yKey}</span>
+              <span className="font-mono text-purple-300 font-semibold text-base">
+                {typeof data[yKey] === 'number' ? Number(data[yKey]).toLocaleString(undefined, { maximumFractionDigits: 2 }) : data[yKey]}
+              </span>
+            </div>
+          </div>
+
+          {/* Footer / Outlier Info */}
           {data.isOutlier && (
-            <div className="text-red-400 font-bold flex items-center gap-1">
-              <AlertTriangle size={12} /> Outlier Detected
+            <div className="px-4 py-3 bg-red-500/5 border-t border-red-500/10">
+               <div className="text-red-400 font-bold flex items-center gap-2 mb-2 text-xs uppercase tracking-wider">
+                  <AlertTriangle size={14} /> 
+                  <span>Outlier Detected</span>
+               </div>
+               <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className={`p-2 rounded bg-slate-900/40 border ${Math.abs(data.zScoreX || 0) > threshold ? 'border-red-500/30' : 'border-slate-700/30'}`}>
+                    <span className="text-slate-500 block mb-1">Z-Score (X)</span>
+                    <span className={`font-mono font-bold ${Math.abs(data.zScoreX || 0) > threshold ? 'text-red-400' : 'text-slate-300'}`}>
+                      {data.zScoreX?.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className={`p-2 rounded bg-slate-900/40 border ${Math.abs(data.zScoreY || 0) > threshold ? 'border-red-500/30' : 'border-slate-700/30'}`}>
+                    <span className="text-slate-500 block mb-1">Z-Score (Y)</span>
+                    <span className={`font-mono font-bold ${Math.abs(data.zScoreY || 0) > threshold ? 'text-red-400' : 'text-slate-300'}`}>
+                      {data.zScoreY?.toFixed(2)}
+                    </span>
+                  </div>
+               </div>
             </div>
           )}
-          <div className="mt-2 text-slate-500">
-             Raw values available in table
-          </div>
         </div>
       );
     }
@@ -109,26 +181,36 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ dataset, onReset,
   return (
     <div className="space-y-6 h-full min-h-[calc(100vh-140px)] flex flex-col">
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-4 border-b border-slate-800 pb-1">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+            <div className="flex items-center gap-4">
+                <button
+                    onClick={() => setActiveTab('analysis')}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors
+                        ${activeTab === 'analysis' 
+                            ? 'border-blue-500 text-blue-400 bg-slate-800/50' 
+                            : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                        }`}
+                >
+                    <BarChart2 size={16} /> Analysis & Insights
+                </button>
+                <button
+                    onClick={() => setActiveTab('data')}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors
+                        ${activeTab === 'data' 
+                            ? 'border-blue-500 text-blue-400 bg-slate-800/50' 
+                            : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+                        }`}
+                >
+                    <Table size={16} /> Data Editor
+                </button>
+            </div>
+            
             <button
-                onClick={() => setActiveTab('analysis')}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors
-                    ${activeTab === 'analysis' 
-                        ? 'border-blue-500 text-blue-400 bg-slate-800/50' 
-                        : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                    }`}
+              onClick={handleExportCsv}
+              className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors border border-transparent hover:border-slate-600 mb-1"
+              title="Download current data as CSV"
             >
-                <BarChart2 size={16} /> Analysis & Insights
-            </button>
-            <button
-                onClick={() => setActiveTab('data')}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors
-                    ${activeTab === 'data' 
-                        ? 'border-blue-500 text-blue-400 bg-slate-800/50' 
-                        : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-                    }`}
-            >
-                <Table size={16} /> Data Editor
+              <Download size={16} /> Export Data
             </button>
         </div>
 
@@ -214,7 +296,7 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ dataset, onReset,
                                 tick={{fill: '#94a3b8', fontSize: 12}}
                                 label={{ value: yKey, angle: -90, position: 'insideLeft', fill: '#64748b' }}
                             />
-                            <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+                            <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3', stroke: '#64748b' }} />
                             <Scatter name="Data Points" data={analysisResult?.processedData || []} fill="#3b82f6">
                                 {analysisResult?.processedData.map((entry, index) => (
                                 <Cell 
