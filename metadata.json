@@ -1,0 +1,5 @@
+{
+  "name": "OutlierAI Analyst",
+  "description": "A powerful data analysis tool that visualizes datasets, detects statistical outliers, and provides AI-driven insights using Gemini. Supports CSV upload and database connections.",
+  "requestFramePermissions": []
+}
